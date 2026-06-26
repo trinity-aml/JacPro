@@ -1,0 +1,16 @@
+services:
+  jacpro:
+    build: .
+    container_name: jacpro
+    ports:
+      - "5002:5002"
+    environment:
+      JACRED_BASE_URL: "http://jacred:9117"
+      JACRED_APIKEY: ""
+      JACPRO_CONFIG: "/config/config.json"
+    volumes:
+      - jacpro-config:/config
+    restart: unless-stopped
+
+volumes:
+  jacpro-config:

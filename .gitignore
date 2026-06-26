@@ -1,0 +1,6 @@
+.gocache/
+Dist/
+config.json
+jacpro
+*.log
+*.tmp
