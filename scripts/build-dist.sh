@@ -3,7 +3,7 @@ set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${DIST_DIR:-"$ROOT_DIR/Dist"}"
-PACKAGE="${PACKAGE:-./cmd/jacpro}"
+PACKAGE="${PACKAGE:-}"
 BINARY_NAME="${BINARY_NAME:-jacpro}"
 CGO_ENABLED="${CGO_ENABLED:-0}"
 LDFLAGS="${LDFLAGS:--s -w}"
@@ -52,11 +52,48 @@ if [[ -z "$BUILD_DATE" ]]; then
   BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 fi
 
+resolve_package() {
+  if [[ -n "$PACKAGE" ]]; then
+    echo "$PACKAGE"
+    return 0
+  fi
+
+  if [[ -d "$ROOT_DIR/cmd/jacpro" ]]; then
+    echo "./cmd/jacpro"
+    return 0
+  fi
+
+  local packages
+  packages="$(cd "$ROOT_DIR" && go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./... 2>/dev/null | sed '/^$/d' || true)"
+  if [[ -n "$packages" ]]; then
+    echo "$packages" | head -n 1
+    return 0
+  fi
+
+  echo "could not find a Go main package. Set PACKAGE=./path/to/main-package" >&2
+  echo "Go files found:" >&2
+  find "$ROOT_DIR" -maxdepth 4 -type f -name '*.go' -print | sed "s#^$ROOT_DIR/#  #" >&2
+  return 1
+}
+
+if ! PACKAGE="$(resolve_package)"; then
+  exit 1
+fi
+if [[ "$PACKAGE" == ./* && ! -d "$ROOT_DIR/${PACKAGE#./}" ]]; then
+  echo "package path $PACKAGE does not exist under $ROOT_DIR" >&2
+  exit 1
+fi
+BUILDINFO_PACKAGE="$(cd "$ROOT_DIR" && go list -f '{{.ImportPath}}' ./internal/buildinfo 2>/dev/null || true)"
+if [[ -z "$BUILDINFO_PACKAGE" ]]; then
+  echo "could not resolve ./internal/buildinfo package" >&2
+  exit 1
+fi
+
 BUILD_LDFLAGS=(
   "$LDFLAGS"
-  "-X" "jacpro/internal/buildinfo.Version=$VERSION"
-  "-X" "jacpro/internal/buildinfo.Commit=$COMMIT"
-  "-X" "jacpro/internal/buildinfo.Date=$BUILD_DATE"
+  "-X" "$BUILDINFO_PACKAGE.Version=$VERSION"
+  "-X" "$BUILDINFO_PACKAGE.Commit=$COMMIT"
+  "-X" "$BUILDINFO_PACKAGE.Date=$BUILD_DATE"
 )
 
 mkdir -p "$DIST_DIR" "$GOCACHE"
