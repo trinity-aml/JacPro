@@ -24,6 +24,12 @@ func NewServer(store *SettingsStore, logger *Logger) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	path := r.URL.Path
 	switch {
 	case path == "/":
@@ -357,4 +363,11 @@ func internalError(w http.ResponseWriter, err error) {
 
 func textStatus(status int) string {
 	return fmt.Sprintf("%d %s", status, http.StatusText(status))
+}
+
+func setCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key, x-api-key, X-Requested-With")
+	w.Header().Set("Access-Control-Allow-Private-Network", "true")
 }

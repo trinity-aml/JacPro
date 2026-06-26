@@ -36,6 +36,28 @@ func TestTorznabCapsRoute(t *testing.T) {
 	if !strings.Contains(body, "<caps>") || !strings.Contains(body, "proxy.test/api/v2.0/indexers/all/results/torznab/api") {
 		t.Fatalf("unexpected caps body: %s", body)
 	}
+	if rr.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("missing CORS header: %#v", rr.Header())
+	}
+}
+
+func TestCORSPreflight(t *testing.T) {
+	server := newTestServer(t)
+	req := httptest.NewRequest(http.MethodOptions, "http://proxy.test/api/v2.0/indexers/all/results", nil)
+	req.Header.Set("Origin", "https://lampa.example")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	rr := httptest.NewRecorder()
+	server.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("missing allow-origin: %#v", rr.Header())
+	}
+	if !strings.Contains(rr.Header().Get("Access-Control-Allow-Headers"), "X-Api-Key") {
+		t.Fatalf("missing api key header allowance: %#v", rr.Header())
+	}
 }
 
 func TestJackettIndexersRoute(t *testing.T) {

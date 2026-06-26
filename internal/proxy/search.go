@@ -1,6 +1,9 @@
 package proxy
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 type SearchOptions struct {
 	APIKey        string
@@ -132,9 +135,9 @@ func (b *Backend) SearchCombined(ctx context.Context, opts SearchOptions) []map[
 		titleRU, titleEN = splitBilingualQuery(opts.Query)
 	}
 
-	var batches [][]map[string]any
+	var tasks []func() []map[string]any
 	if cardMode {
-		batches = append(batches, b.fetchV2(ctx, FetchV2Options{
+		fetchOpts := FetchV2Options{
 			APIKey:        opts.APIKey,
 			Query:         opts.Query,
 			Title:         titleRU,
@@ -146,36 +149,46 @@ func (b *Backend) SearchCombined(ctx context.Context, opts SearchOptions) []map[
 			Categories:    opts.Categories,
 			Label:         "v2-card",
 			Settings:      settings,
-		}))
+		}
+		tasks = append(tasks, func() []map[string]any {
+			return b.fetchV2(ctx, fetchOpts)
+		})
 	} else {
 		for _, term := range buildQueryVariants(opts.Query, titleRU, titleEN, settings) {
 			label := "v2-fuzzy:" + term
 			if len(label) > len("v2-fuzzy:")+32 {
 				label = label[:len("v2-fuzzy:")+32]
 			}
-			batches = append(batches, b.fetchV2(ctx, FetchV2Options{
+			fetchOpts := FetchV2Options{
 				APIKey:   opts.APIKey,
 				Query:    term,
 				Tracker:  opts.Tracker,
 				IsSerial: opts.IsSerial,
 				Label:    label,
 				Settings: settings,
-			}))
+			}
+			tasks = append(tasks, func() []map[string]any {
+				return b.fetchV2(ctx, fetchOpts)
+			})
 		}
 	}
 
 	if mergeV1 {
 		for _, pair := range v1SearchPairs(opts.Query, titleRU, titleEN, settings) {
-			batches = append(batches, b.fetchV1(ctx, FetchV1Options{
+			fetchOpts := FetchV1Options{
 				APIKey:   opts.APIKey,
 				Search:   pair.Search,
 				AltName:  pair.AltName,
 				Season:   opts.Season,
 				Settings: settings,
-			}))
+			}
+			tasks = append(tasks, func() []map[string]any {
+				return b.fetchV1(ctx, fetchOpts)
+			})
 		}
 	}
 
+	batches := runSearchTasks(tasks)
 	merged := mergeTorrentLists(batches...)
 	mode := "fuzzy"
 	if cardMode {
@@ -183,4 +196,18 @@ func (b *Backend) SearchCombined(ctx context.Context, opts SearchOptions) []map[
 	}
 	b.logger.Infof("[BACKEND] combined %d unique (mode=%s v1=%v)", len(merged), mode, mergeV1)
 	return merged
+}
+
+func runSearchTasks(tasks []func() []map[string]any) [][]map[string]any {
+	batches := make([][]map[string]any, len(tasks))
+	var wg sync.WaitGroup
+	wg.Add(len(tasks))
+	for i, task := range tasks {
+		go func(i int, task func() []map[string]any) {
+			defer wg.Done()
+			batches[i] = task()
+		}(i, task)
+	}
+	wg.Wait()
+	return batches
 }
