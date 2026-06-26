@@ -58,6 +58,11 @@ resolve_package() {
     return 0
   fi
 
+  if [[ -f "$ROOT_DIR/main.go" ]]; then
+    echo "."
+    return 0
+  fi
+
   if [[ -d "$ROOT_DIR/cmd/jacpro" ]]; then
     echo "./cmd/jacpro"
     return 0

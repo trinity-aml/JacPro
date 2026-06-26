@@ -34,7 +34,7 @@ http://127.0.0.1:5002/settings
 Сборка локального бинарника:
 
 ```bash
-go build -o jacpro ./cmd/jacpro
+go build -o jacpro .
 ./jacpro
 ```
 
@@ -166,6 +166,13 @@ docker run --rm -p 5002:5002 \
 
 ```text
 http://jacred:9117
+```
+
+Релизный workflow публикует Docker images в GitHub Container Registry:
+
+```text
+ghcr.io/<owner>/<repo>:<release-tag>
+ghcr.io/<owner>/<repo>:latest
 ```
 
 ## Проверка

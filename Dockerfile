@@ -2,14 +2,14 @@ FROM golang:1.22-bookworm AS build
 
 WORKDIR /src
 COPY go.mod ./
-COPY cmd ./cmd
+COPY main.go ./
 COPY internal ./internal
 ARG VERSION=dev
 ARG COMMIT=
 ARG BUILD_DATE=
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
     -ldflags="-s -w -X jacpro/internal/buildinfo.Version=${VERSION} -X jacpro/internal/buildinfo.Commit=${COMMIT} -X jacpro/internal/buildinfo.Date=${BUILD_DATE}" \
-    -o /out/jacpro ./cmd/jacpro
+    -o /out/jacpro .
 
 FROM debian:bookworm-slim
 

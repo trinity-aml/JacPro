@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -30,6 +31,21 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Prepare release metadata
+        id: meta
+        shell: bash
+        run: |
+          release_tag="${{ github.event.release.tag_name || inputs.tag }}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          short_sha="$(git rev-parse --short HEAD)"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          {
+            echo "release_tag=$release_tag"
+            echo "image=$image"
+            echo "short_sha=$short_sha"
+            echo "build_date=$build_date"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Test
         run: go test ./...
 
@@ -37,10 +53,41 @@ jobs:
         run: go vet ./...
 
       - name: Build distribution binaries
+        env:
+          VERSION: ${{ steps.meta.outputs.release_tag }}
+          COMMIT: ${{ steps.meta.outputs.short_sha }}
+          BUILD_DATE: ${{ steps.meta.outputs.build_date }}
         run: ./scripts/build-dist.sh
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.release_tag }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.release_tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.release_tag }}
+            COMMIT=${{ steps.meta.outputs.short_sha }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
 
       - name: Upload assets to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
         run: gh release upload "$RELEASE_TAG" Dist/* --clobber

@@ -37,7 +37,7 @@ http://127.0.0.1:5002/settings
 Build a binary:
 
 ```bash
-go build -o jacpro ./cmd/jacpro
+go build -o jacpro .
 ./jacpro
 ```
 
@@ -161,6 +161,13 @@ docker run --rm -p 5002:5002 \
 
 In Docker Compose, set `JACRED_BASE_URL` to a service name reachable from the
 container, for example `http://jacred:9117`.
+
+The release workflow publishes Docker images to GitHub Container Registry:
+
+```text
+ghcr.io/<owner>/<repo>:<release-tag>
+ghcr.io/<owner>/<repo>:latest
+```
 
 ## Test
 
