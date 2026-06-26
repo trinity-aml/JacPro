@@ -75,10 +75,120 @@ resolve_package() {
     return 0
   fi
 
-  echo "could not find a Go main package. Set PACKAGE=./path/to/main-package" >&2
-  echo "Go files found:" >&2
-  find "$ROOT_DIR" -maxdepth 4 -type f -name '*.go' -print | sed "s#^$ROOT_DIR/#  #" >&2
-  return 1
+  if ! create_fallback_main; then
+    return 1
+  fi
+  echo "./.build/jacpro-main"
+}
+
+create_fallback_main() {
+  local module_path
+  module_path="$(cd "$ROOT_DIR" && go list -m -f '{{.Path}}')"
+  if [[ ! -d "$ROOT_DIR/internal/proxy" || ! -d "$ROOT_DIR/internal/buildinfo" ]]; then
+    echo "could not find a Go main package and fallback packages are missing." >&2
+    echo "Set PACKAGE=./path/to/main-package." >&2
+    echo "Go files found:" >&2
+    find "$ROOT_DIR" -maxdepth 4 -type f -name '*.go' -print | sed "s#^$ROOT_DIR/#  #" >&2
+    return 1
+  fi
+
+  mkdir -p "$ROOT_DIR/.build/jacpro-main"
+  cat > "$ROOT_DIR/.build/jacpro-main/main.go" <<EOF
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"time"
+
+	"$module_path/internal/buildinfo"
+	"$module_path/internal/proxy"
+)
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "jacpro: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	config := proxy.ResolveConfigPath()
+	for _, warning := range config.Warnings {
+		fmt.Fprintf(os.Stderr, "jacpro: %s\n", warning)
+	}
+
+	store, warnings, err := proxy.NewSettingsStore(config.Path)
+	if err != nil {
+		return err
+	}
+
+	logger, err := proxy.NewLogger(store.Get())
+	if err != nil {
+		return err
+	}
+	defer logger.Close()
+	logger.Infof(
+		"jacpro version=%s platform=%s commit=%s build_date=%s",
+		buildinfo.Version,
+		buildinfo.Platform(),
+		valueOrUnknown(buildinfo.Commit),
+		valueOrUnknown(buildinfo.Date),
+	)
+	logger.Infof("settings file: %s (%s, found=%v)", config.Path, config.Source, config.Found)
+	for _, warning := range warnings {
+		logger.Warningf("%s", warning)
+	}
+
+	app := proxy.NewServer(store, logger)
+	settings := store.Get()
+	addr := fmt.Sprintf("%s:%d", settings.Host, settings.Port)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           app,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Infof("listening on http://%s", addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+
+	select {
+	case sig := <-sigCh:
+		logger.Infof("received %s, shutting down", sig)
+	case err := <-errCh:
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		return err
+	}
+	return <-errCh
+}
+
+func valueOrUnknown(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
+EOF
+  echo "No main package found; generated fallback entrypoint at .build/jacpro-main" >&2
 }
 
 if ! PACKAGE="$(resolve_package)"; then

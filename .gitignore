@@ -1,4 +1,5 @@
 .gocache/
+.build/
 Dist/
 config.json
 jacpro
